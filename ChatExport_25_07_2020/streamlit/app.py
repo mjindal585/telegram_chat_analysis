@@ -11,11 +11,13 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from wordcloud import WordCloud, STOPWORDS, ImageColorGenerator
 import time
+import base64
+from matplotlib import style
 
 
 # -*- coding: utf-8 -*-
 """
-Created on : &nbsp;&nbsp; Sat 1-08-2020  &nbsp;&nbsp; Author: @mjindal585
+Created on : &nbsp;&nbsp; Sat 1-08-2020  &nbsp;&nbsp; &nbsp;&nbsp; Author:&nbsp;&nbsp;  @mjindal585
 """
 
 st.set_option('deprecation.showfileUploaderEncoding', False)
@@ -68,7 +70,7 @@ def preprocessing(df):
     df['date'] = df.apply(lambda x: ' '.join(x['date'].split('T')),axis=1).astype('datetime64[ns]')
     df['from'] = df['from'] + ' ' + '( ' + df['from_id'].astype(str) + ' )'
     final = df[['id','date','from','message','reply_to_message_id']]
-    final.to_csv('finalchat.csv',index=False)
+    final.to_csv('finalchat-custom.csv',index=False)
 
 
 def run_analysis(df):
@@ -83,6 +85,7 @@ def run_analysis(df):
     df["emoji"] = df["message"].apply(split_count)
     df['Messagecount'] = 1
     emojis = sum(df['emoji'].str.len())
+    #st.write(emojis)
     total_messages = df.shape[0]
     URLPATTERN = r'(https?://\S+)'
     df['urlcount'] = df.message.apply(lambda x: re.findall(URLPATTERN, x)).str.len()
@@ -91,9 +94,16 @@ def run_analysis(df):
     df['Letter_Count'] = df['message'].apply(lambda s : len(s))
     df['Word_Count'] = df['message'].apply(lambda s : len(s.split(' ')))
     df["emoji_count"]= df['emoji'].str.len()
+    #st.write(df['from'].unique())
+    df = df[df['from'].notna()]
+    #st.write(df['from'].unique())
+
+    
+
+
 
     #generate stats dataset for each user
-
+    
     l = df['from'].unique()
     stats = list()
 
@@ -106,15 +116,15 @@ def run_analysis(df):
         #Word_Count contains of total words in one message. Sum of all words/ Total Messages will yield words per message
         words_per_message = (np.sum(req_df['Word_Count']))/req_df.shape[0]
         # emojis conists of total emojis
-        emojis = sum(req_df['emoji'].str.len())
+        emojis_stat = sum(req_df['emoji'].str.len())
         #links consist of total links
-        links = sum(req_df["urlcount"])   
+        links_stat = sum(req_df["urlcount"])   
         #append teh data to stats list
-        stats.append([l[i],message_sent,words_per_message,emojis,links])
+        stats.append([l[i],message_sent,words_per_message,emojis_stat,links_stat])
     
     stats_df = pd.DataFrame(stats,columns=['From','Messages_sent','Words_per_message','Emojis_sent','Links_sent'])
     stats_df.to_csv('stats.csv',index=False)  
-
+    
     total_emojis_list = list([a for b in df.emoji for a in b])
     emoji_dict = dict(Counter(total_emojis_list))
     emoji_dict = sorted(emoji_dict.items(), key=lambda x: x[1], reverse=True)
@@ -126,10 +136,15 @@ def run_analysis(df):
     reply_dict = sorted(reply_dict.items(), key=lambda x: x[1], reverse=True)
 
     def f(i):
-        l = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    return l[i];
-    
-    day_df=pd.DataFrame(df["message"])
+        x = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        return x[i]
+
+    df['date'] = df['date'].astype('datetime64[ns]')
+
+    #st.write(df.dtypes)
+
+    day_df=pd.DataFrame()
+    day_df['message'] = df["message"]
     day_df['day_of_date'] = df['date'].dt.weekday
     day_df['day_of_date'] = day_df["day_of_date"].apply(f)
     day_df["messagecount"] = 1
@@ -143,18 +158,114 @@ def run_analysis(df):
     # Generate a word cloud image
     wordcloud = WordCloud(stopwords=stopwords, background_color="white").generate(text)
 
+    #st.write(df['from'].value_counts().head(10))
+    #print(df['from'].value_counts().head(10))
+    
+    
+    options=["Select","Total number of words typed, messages, emojis and links sent","Generate a dataframe for count of each emoji used and plot a pie chart", \
+            "Details of the most replied messages","Day and Date wise statistics of messages sent","Most Active People, Time , Days","Details of the Longest Message",\
+            "Generate and Download Stats for each User","Word Cloud of the chat"]
+    
+    ch = st.selectbox("Select Option",options)
+    
+    if ch == "Select":
+        st.warning("No option selected")
+
+    elif ch == "Total number of words typed, messages, emojis and links sent":
+        st.write("Stats")
+        st.write("Words Typed : " + str(len(text)))
+        st.write("Messages : "+ str(total_messages))
+        st.write("Emojis : " + str(emojis))
+        st.write("Links : " + str(links))
+    
+    elif ch== "Generate a dataframe for count of each emoji used and plot a pie chart":
+        st.write(emoji_df)
+        fig = px.pie(emoji_df, values='count', names='emoji')
+        fig.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig)
+
+    elif ch == "Details of the most replied messages":
+        for i,j in reply_dict[:10]:
+            for k in range(len(df)):
+                if df.iloc[k]['id'] == i:
+                    st.write(df.iloc[k][['from','message']])
+
+    elif ch == "Day and Date wise statistics of messages sent":
+        fig = px.line_polar(day, r='messagecount', theta='day_of_date', line_close=True)
+        fig.update_traces(fill='toself')
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                visible=True,
+            )),
+            showlegend=False
+        )
+        st.plotly_chart(fig)
+
+        df['Date'] = [datetime.datetime.date(d) for d in df['date']] 
+        data = df['Date'].value_counts()
+        fig = px.bar(data, orientation='v')
+        
+        st.plotly_chart(fig)
+
+    elif ch == "Details of the Longest Message":
+        st.write(df.iloc[df['Word_Count'].argmax()][['id','date','from','message']])
+
+    elif ch == "Word Cloud of the chat":
+        plt.figure(figsize=(15,10))
+        plt.imshow(wordcloud, interpolation='bilinear')
+        plt.axis("off")
+        st.pyplot(plt)
+
+    elif ch == "Generate and Download Stats for each User":
+        
+        st.write(stats_df)  
+
+        def download_link(object_to_download, download_filename, download_link_text):
+        
+            if isinstance(object_to_download,pd.DataFrame):
+                object_to_download = object_to_download.to_csv(index=False)
+
+                # some strings <-> bytes conversions necessary here
+            b64 = base64.b64encode(object_to_download.encode()).decode()
+
+            return f'<a href="data:file/txt;base64,{b64}" download="{download_filename}">{download_link_text}</a>'
+
+        if st.button('Click here to Generate download Link '):
+            tmp_download_link = download_link(stats_df, 'stats.csv', 'Click here to download your data!')
+            st.markdown(tmp_download_link, unsafe_allow_html=True)
+
+    elif ch == "Most Active People, Time , Days":
+        st.write("Most Active People")
+        st.write(df['from'].value_counts().head(10))
+
+        st.write("\n")
+        style.use('seaborn-darkgrid')
+
+        df['Time'] = [datetime.datetime.time(d).strftime('%H:%M') for d in df['date']] 
+        df['Time'].value_counts().head(10).plot.barh() # Top 10 Times of the day at which the most number of messages were sent
+        plt.title("Most Active Time")
+        plt.xlabel('Number of messages')
+        plt.ylabel('Time')
+
+        st.pyplot(plt)
+
+
+        
+        df['Date'] = [datetime.datetime.date(d) for d in df['date']] 
+        df['Date'].value_counts().head(10).plot.barh()
+        plt.title("Most Active Days")
+        plt.xlabel('Number of Messages')
+        plt.ylabel('Date')
+        st.pyplot(plt)
 
 
 def app():
     st.title("Telegram Group Chat Analysis 💬 🗣️ 💭 ")
-    option=["About","Discussion on ML and DL by Krish","Custom Chat"]
+    option=["About","Analyze Chat"]
     choice = st.sidebar.selectbox("Menu",option)
 
-    if choice == "Discussion on ML and DL by Krish":
-        st.subheader("Chat Analysis of the telegram channel \"Discussion on ML and DL by Krish Naik\" (till 25-07-2020) ")
-
-
-    elif choice == "About":
+    if choice == "About":
 
         st.subheader("This app aims to perform various analysis on telegram group chats:")
         st.write("1. Get the total number of words typed, messages, emojis and links sent")
